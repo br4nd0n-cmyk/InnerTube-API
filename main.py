@@ -11,6 +11,30 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from pathlib import Path
 
+# ==========================================
+# GLOBAL COOKIE INTERCEPT OVERRIDE (PATCH)
+# ==========================================
+try:
+    import innertube
+    # Store the original constructor method
+    _orig_init = innertube.InnerTube.__init__
+    
+    def _patched_init(self, client_name="WEB", *args, **kwargs):
+        cookie_path = Path(__file__).parent / "cookies.json"
+        if cookie_path.exists():
+            # Force inner client to use your valid browser session file profile mapping
+            kwargs['cookies'] = str(cookie_path)
+            logging.getLogger(__name__).info("🚀 [InnerTube Patch] Successfully hijacked client init and injected cookies.json profile mapping.")
+        else:
+            logging.getLogger(__name__).warning("⚠️ [InnerTube Patch] cookies.json file not found in root repository path.")
+        _orig_init(self, client_name, *args, **kwargs)
+        
+    # Replace the library's internal client initializer layout dynamically
+    innertube.InnerTube.__init__ = _patched_init
+except Exception as patch_err:
+    logging.getLogger(__name__).error(f"❌ Could not apply global cookie profile patch: {patch_err}")
+# ==========================================
+
 from config import (
     API_TITLE,
     API_DESCRIPTION,
@@ -195,4 +219,4 @@ if __name__ == "__main__":
         port=API_PORT,
         reload=True,
         log_level="info"
-    )
+)
