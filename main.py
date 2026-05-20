@@ -180,6 +180,7 @@ async def api_info():
         }
     }
 
+app = app  # Explicitly exposes the FastAPI instance to Vercel's handler
 
 if __name__ == "__main__":
     import uvicorn
