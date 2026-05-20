@@ -12,47 +12,6 @@ import logging
 from pathlib import Path
 import json
 
-# ==========================================
-# ROBUST COOKIE PARSER & INTERCEPT OVERRIDE
-# ==========================================
-logger = logging.getLogger(__name__)
-
-try:
-    import innertube
-    _orig_init = innertube.InnerTube.__init__
-    
-    def _patched_init(self, client_name="WEB", *args, **kwargs):
-        cookie_file = Path(__file__).parent / "cookies.json"
-        if cookie_file.exists():
-            try:
-                with open(cookie_file, "r", encoding="utf-8") as f:
-                    raw_cookies = json.load(f)
-                
-                # Convert browser Cookie-Editor array into a standard Python dict
-                cookie_dict = {}
-                if isinstance(raw_cookies, list):
-                    for cookie in raw_cookies:
-                        if "name" in cookie and "value" in cookie:
-                            cookie_dict[cookie["name"]] = cookie["value"]
-                elif isinstance(raw_cookies, dict):
-                    cookie_dict = raw_cookies
-
-                if cookie_dict:
-                    # Inject safe parsed dictionary instead of raw file path string
-                    kwargs['cookies'] = cookie_dict
-                    print("🚀 [InnerTube Patch] Parsed and injected browser session profiles safely.")
-            except Exception as cookie_err:
-                print(f"⚠️ [InnerTube Patch] Failed parsing cookies.json: {cookie_err}")
-        else:
-            print("⚠️ [InnerTube Patch] cookies.json file not found in root repository path.")
-            
-        _orig_init(self, client_name, *args, **kwargs)
-        
-    innertube.InnerTube.__init__ = _patched_init
-except Exception as patch_err:
-    print(f"❌ Could not apply global cookie profile patch: {patch_err}")
-# ==========================================
-
 from config import (
     API_TITLE,
     API_DESCRIPTION,
@@ -78,6 +37,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
@@ -109,6 +69,48 @@ app.include_router(playlists_router)
 app.include_router(comments_router)
 app.include_router(music_router)
 app.include_router(advanced_router)
+
+
+# ==========================================
+# ISOLATED STARTUP COOKIE INJECTION LIFECYCLE
+# ==========================================
+@app.on_event("startup")
+async def apply_cookies_override():
+    """Applies cookie configurations safely after app initialization completes"""
+    try:
+        import innertube
+        _orig_init = innertube.InnerTube.__init__
+        
+        def _patched_init(self, client_name="WEB", *args, **kwargs):
+            cookie_file = Path(__file__).parent / "cookies.json"
+            if cookie_file.exists():
+                try:
+                    with open(cookie_file, "r", encoding="utf-8") as f:
+                        raw_cookies = json.load(f)
+                    
+                    cookie_dict = {}
+                    if isinstance(raw_cookies, list):
+                        for cookie in raw_cookies:
+                            if "name" in cookie and "value" in cookie:
+                                cookie_dict[cookie["name"]] = cookie["value"]
+                    elif isinstance(raw_cookies, dict):
+                        cookie_dict = raw_cookies
+
+                    if cookie_dict:
+                        kwargs['cookies'] = cookie_dict
+                        logger.info("🚀 [InnerTube Patch] Parsed and injected browser session profiles safely via startup lifecycle.")
+                except Exception as cookie_err:
+                    logger.error(f"⚠️ [InnerTube Patch] Failed parsing cookies.json: {cookie_err}")
+            else:
+                logger.warning("⚠️ [InnerTube Patch] cookies.json file not found in root repository path.")
+                
+            _orig_init(self, client_name, *args, **kwargs)
+            
+        innertube.InnerTube.__init__ = _patched_init
+        logger.info("🔒 [Lifecycle Patch] Global runtime hook mounted successfully.")
+    except Exception as patch_err:
+        logger.error(f"❌ Startup runtime engine modification failed: {patch_err}")
+# ==========================================
 
 
 @app.get("/", response_class=HTMLResponse)
