@@ -10,29 +10,47 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from pathlib import Path
+import json
 
 # ==========================================
-# GLOBAL COOKIE INTERCEPT OVERRIDE (PATCH)
+# ROBUST COOKIE PARSER & INTERCEPT OVERRIDE
 # ==========================================
+logger = logging.getLogger(__name__)
+
 try:
     import innertube
-    # Store the original constructor method
     _orig_init = innertube.InnerTube.__init__
     
     def _patched_init(self, client_name="WEB", *args, **kwargs):
-        cookie_path = Path(__file__).parent / "cookies.json"
-        if cookie_path.exists():
-            # Force inner client to use your valid browser session file profile mapping
-            kwargs['cookies'] = str(cookie_path)
-            logging.getLogger(__name__).info("🚀 [InnerTube Patch] Successfully hijacked client init and injected cookies.json profile mapping.")
+        cookie_file = Path(__file__).parent / "cookies.json"
+        if cookie_file.exists():
+            try:
+                with open(cookie_file, "r", encoding="utf-8") as f:
+                    raw_cookies = json.load(f)
+                
+                # Convert browser Cookie-Editor array into a standard Python dict
+                cookie_dict = {}
+                if isinstance(raw_cookies, list):
+                    for cookie in raw_cookies:
+                        if "name" in cookie and "value" in cookie:
+                            cookie_dict[cookie["name"]] = cookie["value"]
+                elif isinstance(raw_cookies, dict):
+                    cookie_dict = raw_cookies
+
+                if cookie_dict:
+                    # Inject safe parsed dictionary instead of raw file path string
+                    kwargs['cookies'] = cookie_dict
+                    print("🚀 [InnerTube Patch] Parsed and injected browser session profiles safely.")
+            except Exception as cookie_err:
+                print(f"⚠️ [InnerTube Patch] Failed parsing cookies.json: {cookie_err}")
         else:
-            logging.getLogger(__name__).warning("⚠️ [InnerTube Patch] cookies.json file not found in root repository path.")
+            print("⚠️ [InnerTube Patch] cookies.json file not found in root repository path.")
+            
         _orig_init(self, client_name, *args, **kwargs)
         
-    # Replace the library's internal client initializer layout dynamically
     innertube.InnerTube.__init__ = _patched_init
 except Exception as patch_err:
-    logging.getLogger(__name__).error(f"❌ Could not apply global cookie profile patch: {patch_err}")
+    print(f"❌ Could not apply global cookie profile patch: {patch_err}")
 # ==========================================
 
 from config import (
@@ -60,7 +78,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
@@ -101,7 +118,6 @@ async def root():
     if index_file.exists():
         return FileResponse(index_file)
     
-    # Fallback HTML if static file doesn't exist
     return """
     <!DOCTYPE html>
     <html>
@@ -219,4 +235,4 @@ if __name__ == "__main__":
         port=API_PORT,
         reload=True,
         log_level="info"
-)
+    )
