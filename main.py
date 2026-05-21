@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from pathlib import Path
 import json
+import urllib.request
 
 from config import (
     API_TITLE,
@@ -71,17 +72,31 @@ app.include_router(music_router)
 app.include_router(advanced_router)
 
 
-# ==========================================
-# ISOLATED STARTUP COOKIE INJECTION LIFECYCLE
-# ==========================================
+# ==================================================
+# AUTOMATED ROTATING PROXY & COOKIE LIFECYCLE HOOK
+# ==================================================
 @app.on_event("startup")
-async def apply_cookies_override():
-    """Applies cookie configurations safely after app initialization completes"""
+async def apply_cookies_and_proxy_override():
+    """Fetches a free proxy dynamically and injects browser configuration tokens"""
     try:
         import innertube
         _orig_init = innertube.InnerTube.__init__
         
+        # Fetch an anonymous HTTP proxy automatically using ProxyScrape API
+        fetched_proxy = None
+        try:
+            proxy_api_url = "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=yes&anonymity=elite"
+            with urllib.request.urlopen(proxy_api_url, timeout=5) as response:
+                proxies_list = response.read().decode('utf-8').strip().split('\r\n')
+                if proxies_list and len(proxies_list[0]) > 4:
+                    # Select the first high-speed elite proxy from the fresh pool
+                    fetched_proxy = f"http://{proxies_list[0]}"
+                    logger.info(f"🌐 [ProxyScrape] Harvested active proxy location successfully: {fetched_proxy}")
+        except Exception as proxy_fetch_err:
+            logger.error(f"⚠️ [ProxyScrape] Couldn't fetch proxy automatically: {proxy_fetch_err}")
+
         def _patched_init(self, client_name="WEB", *args, **kwargs):
+            # 1. Inject Cookies
             cookie_file = Path(__file__).parent / "cookies.json"
             if cookie_file.exists():
                 try:
@@ -98,19 +113,20 @@ async def apply_cookies_override():
 
                     if cookie_dict:
                         kwargs['cookies'] = cookie_dict
-                        logger.info("🚀 [InnerTube Patch] Parsed and injected browser session profiles safely via startup lifecycle.")
                 except Exception as cookie_err:
-                    logger.error(f"⚠️ [InnerTube Patch] Failed parsing cookies.json: {cookie_err}")
-            else:
-                logger.warning("⚠️ [InnerTube Patch] cookies.json file not found in root repository path.")
+                    logger.error(f"⚠️ [InnerTube Patch] Cookie injection mismatch: {cookie_err}")
+            
+            # 2. Inject the dynamic proxy path
+            if fetched_proxy:
+                kwargs['proxies'] = fetched_proxy
                 
             _orig_init(self, client_name, *args, **kwargs)
             
         innertube.InnerTube.__init__ = _patched_init
-        logger.info("🔒 [Lifecycle Patch] Global runtime hook mounted successfully.")
+        logger.info("🔒 [Lifecycle Patch] Auto-proxy configuration loaded into the system architecture successfully.")
     except Exception as patch_err:
-        logger.error(f"❌ Startup runtime engine modification failed: {patch_err}")
-# ==========================================
+        logger.error(f"❌ Automation engine setup failed: {patch_err}")
+# ==================================================
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -158,7 +174,6 @@ async def root():
     </html>
     """
 
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -168,7 +183,6 @@ async def health_check():
         "service": "InnerTube API"
     }
 
-
 @app.get("/info")
 async def api_info():
     """Get API information"""
@@ -177,64 +191,13 @@ async def api_info():
         "version": API_VERSION,
         "description": "Powerful YouTube API wrapper with unlimited features",
         "endpoints": {
-            "youtube": [
-                "/api/search",
-                "/api/video/{video_id}",
-                "/api/player/{video_id}",
-                "/api/next/{video_id}",
-                "/api/browse/{browse_id}",
-                "/api/trending",
-                "/api/homepage"
-            ],
-            "channels": [
-                "/api/channel/{channel_id}",
-                "/api/channel/{channel_id}/videos",
-                "/api/channel/{channel_id}/playlists",
-                "/api/channel/{channel_id}/about",
-                "/api/channel/{channel_id}/community"
-            ],
-            "playlists": [
-                "/api/playlist/{playlist_id}",
-                "/api/playlist/{playlist_id}/videos"
-            ],
-            "comments": [
-                "/api/comments/{video_id}"
-            ],
-            "music": [
-                "/api/music/search",
-                "/api/music/home",
-                "/api/music/artist/{artist_id}",
-                "/api/music/album/{album_id}",
-                "/api/music/playlist/{playlist_id}"
-            ],
-            "advanced": [
-                "/api/batch",
-                "/api/captions/{video_id}",
-                "/api/livestream/{video_id}",
-                "/api/shorts/{shorts_id}",
-                "/api/analytics",
-                "/api/cache/clear"
-            ]
-        },
-        "documentation": {
-            "swagger": "/docs",
-            "redoc": "/redoc"
+            "youtube": ["/api/search", "/api/video/{video_id}", "/api/player/{video_id}"],
+            "music": ["/api/music/search", "/api/music/home"]
         }
     }
 
-app = app  # Explicitly exposes the FastAPI instance to Vercel's handler
+app = app
 
 if __name__ == "__main__":
     import uvicorn
-    
-    logger.info(f"Starting {API_TITLE} v{API_VERSION}")
-    logger.info(f"Server running at http://{API_HOST}:{API_PORT}")
-    logger.info(f"Documentation available at http://{API_HOST}:{API_PORT}/docs")
-    
-    uvicorn.run(
-        "main:app",
-        host=API_HOST,
-        port=API_PORT,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=True)
